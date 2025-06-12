@@ -8,7 +8,9 @@ from dbt_mcp.prompts.prompts import get_prompt
 
 
 def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
-    def _run_dbt_command(command: list[str], selector: str | None = None, target: str | None = None) -> str:
+    def _run_dbt_command(
+        command: list[str], selector: str | None = None, target: str | None = None
+    ) -> str:
         # Commands that should always be quiet to reduce output verbosity
         verbose_commands = ["build", "compile", "docs", "parse", "run", "test"]
 
@@ -49,7 +51,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["build"], selector)
+        return _run_dbt_command(["build"], selector, target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/compile"))
     def compile(
@@ -60,7 +62,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["compile"])
+        return _run_dbt_command(["compile"], selector, target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/docs"))
     def docs(
@@ -68,7 +70,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["docs", "generate"])
+        return _run_dbt_command(["docs", "generate"], target)
 
     @dbt_mcp.tool(name="list", description=get_prompt("dbt_cli/list"))
     def ls(
@@ -79,7 +81,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["list"], selector)
+        return _run_dbt_command(["list"], selector, target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/parse"))
     def parse(
@@ -87,7 +89,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["parse"])
+        return _run_dbt_command(["parse"], target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/run"))
     def run(
@@ -98,7 +100,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["run"], selector)
+        return _run_dbt_command(["run"], selector, target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/test"))
     def test(
@@ -109,7 +111,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["test"], selector)
+        return _run_dbt_command(["test"], selector, target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/show"))
     def show(
@@ -125,4 +127,4 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         if limit:
             args.extend(["--limit", str(limit)])
         args.extend(["--output", "json"])
-        return _run_dbt_command(args)
+        return _run_dbt_command(args, target)

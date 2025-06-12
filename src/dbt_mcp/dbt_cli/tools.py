@@ -8,13 +8,17 @@ from dbt_mcp.prompts.prompts import get_prompt
 
 
 def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
-    def _run_dbt_command(command: list[str], selector: str | None = None) -> str:
+    def _run_dbt_command(command: list[str], selector: str | None = None, target: str | None = None) -> str:
         # Commands that should always be quiet to reduce output verbosity
         verbose_commands = ["build", "compile", "docs", "parse", "run", "test"]
 
         if selector:
             selector_params = str(selector).split(" ")
             command = command + ["--select"] + selector_params
+
+        if target:
+            target_params = str(target).split(" ")
+            command = command + ["--target"] + target_params
 
         full_command = command.copy()
         # Add --quiet flag to specific commands to reduce context window usage
@@ -41,15 +45,29 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         selector: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/selectors")
         ),
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
+        ),
     ) -> str:
         return _run_dbt_command(["build"], selector)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/compile"))
-    def compile() -> str:
+    def compile(
+        selector: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/selectors")
+        ),
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
+        ),
+    ) -> str:
         return _run_dbt_command(["compile"])
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/docs"))
-    def docs() -> str:
+    def docs(
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
+        ),
+    ) -> str:
         return _run_dbt_command(["docs", "generate"])
 
     @dbt_mcp.tool(name="list", description=get_prompt("dbt_cli/list"))
@@ -57,17 +75,27 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         selector: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/selectors")
         ),
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
+        ),
     ) -> str:
         return _run_dbt_command(["list"], selector)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/parse"))
-    def parse() -> str:
+    def parse(
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
+        ),
+    ) -> str:
         return _run_dbt_command(["parse"])
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/run"))
     def run(
         selector: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/selectors")
+        ),
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
         return _run_dbt_command(["run"], selector)
@@ -77,6 +105,9 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         selector: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/selectors")
         ),
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
+        ),
     ) -> str:
         return _run_dbt_command(["test"], selector)
 
@@ -85,6 +116,9 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         sql_query: str = Field(description=get_prompt("dbt_cli/args/sql_query")),
         limit: int | None = Field(
             default=None, description=get_prompt("dbt_cli/args/limit")
+        ),
+        target: str | None = Field(
+            default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
         args = ["show", "--inline", sql_query, "--favor-state"]

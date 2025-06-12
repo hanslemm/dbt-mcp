@@ -1,5 +1,8 @@
 import subprocess
+import os
+from pathlib import Path
 
+import yaml
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
@@ -8,6 +11,27 @@ from dbt_mcp.prompts.prompts import get_prompt
 
 
 def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
+    def _find_profiles_yml() -> Path | None:
+        """Find the profiles.yml file in the standard dbt locations."""
+        # Check project directory first
+        project_profiles = Path(config.project_dir) / "profiles.yml"
+        if project_profiles.exists():
+            return project_profiles
+
+        # Check ~/.dbt/profiles.yml
+        home_profiles = Path.home() / ".dbt" / "profiles.yml"
+        if home_profiles.exists():
+            return home_profiles
+
+        # Check DBT_PROFILES_DIR environment variable
+        profiles_dir = os.environ.get("DBT_PROFILES_DIR")
+        if profiles_dir:
+            env_profiles = Path(profiles_dir) / "profiles.yml"
+            if env_profiles.exists():
+                return env_profiles
+
+        return None
+
     def _run_dbt_command(
         command: list[str], selector: str | None = None, target: str | None = None
     ) -> str:
@@ -128,3 +152,37 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             args.extend(["--limit", str(limit)])
         args.extend(["--output", "json"])
         return _run_dbt_command(args, target)
+
+    @dbt_mcp.tool(description=get_prompt("dbt_cli/get_profiles"))
+    def get_profiles() -> str:
+        """Parse profiles.yml and return available target names."""
+        profiles_path = _find_profiles_yml()
+        if not profiles_path:
+            return "Error: Could not find profiles.yml file in project directory, ~/.dbt/, or DBT_PROFILES_DIR"
+        
+        try:
+            with open(profiles_path, 'r') as f:
+                profiles_data = yaml.safe_load(f)
+            
+            if not profiles_data:
+                return "Error: profiles.yml file is empty or invalid"
+            
+            # Extract all profiles and their targets
+            result = {"profiles_file": str(profiles_path), "profiles": {}}
+            
+            for profile_name, profile_config in profiles_data.items():
+                if isinstance(profile_config, dict) and "outputs" in profile_config:
+                    targets = list(profile_config["outputs"].keys())
+                    default_target = profile_config.get("target", targets[0] if targets else None)
+                    result["profiles"][profile_name] = {
+                        "targets": targets,
+                        "default_target": default_target
+                    }
+            
+            import json
+            return json.dumps(result, indent=2)
+            
+        except yaml.YAMLError as e:
+            return f"Error: Failed to parse profiles.yml: {e}"
+        except Exception as e:
+            return f"Error: Failed to read profiles.yml: {e}"

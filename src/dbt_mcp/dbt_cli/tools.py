@@ -1,5 +1,5 @@
-import subprocess
 import os
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -159,29 +159,54 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         profiles_path = _find_profiles_yml()
         if not profiles_path:
             return "Error: Could not find profiles.yml file in project directory, ~/.dbt/, or DBT_PROFILES_DIR"
-        
+
         try:
-            with open(profiles_path, 'r') as f:
+            with open(profiles_path, "r") as f:
                 profiles_data = yaml.safe_load(f)
-            
+
             if not profiles_data:
                 return "Error: profiles.yml file is empty or invalid"
-            
+
             # Extract all profiles and their targets
             result = {"profiles_file": str(profiles_path), "profiles": {}}
-            
+
             for profile_name, profile_config in profiles_data.items():
                 if isinstance(profile_config, dict) and "outputs" in profile_config:
-                    targets = list(profile_config["outputs"].keys())
-                    default_target = profile_config.get("target", targets[0] if targets else None)
+                    targets = {}
+                    for target_name, target_config in profile_config["outputs"].items():
+                        target_info = {"name": target_name}
+
+                        # Extract database type (adapter type)
+                        if "type" in target_config:
+                            target_info["type"] = target_config["type"]
+
+                        # Extract database name
+                        # Different adapters use different keys for database name
+                        db_name = None
+                        if "database" in target_config:
+                            db_name = target_config["database"]
+                        elif "dbname" in target_config:  # Some PostgreSQL configs
+                            db_name = target_config["dbname"]
+                        elif "catalog" in target_config:  # Some adapters use catalog
+                            db_name = target_config["catalog"]
+
+                        if db_name:
+                            target_info["database"] = db_name
+                        
+                        targets[target_name] = target_info
+
+                    default_target = profile_config.get(
+                        "target", list(targets.keys())[0] if targets else None
+                    )
                     result["profiles"][profile_name] = {
                         "targets": targets,
-                        "default_target": default_target
+                        "default_target": default_target,
                     }
-            
+
             import json
+
             return json.dumps(result, indent=2)
-            
+
         except yaml.YAMLError as e:
             return f"Error: Failed to parse profiles.yml: {e}"
         except Exception as e:

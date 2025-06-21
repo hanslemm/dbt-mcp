@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -192,7 +193,15 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
 
                         if db_name:
                             target_info["database"] = db_name
-                        
+
+                        # Add any additional connection details that might be useful
+                        if "host" in target_config:
+                            target_info["host"] = target_config["host"]
+                        if "port" in target_config:
+                            target_info["port"] = target_config["port"]
+                        if "schema" in target_config:
+                            target_info["schema"] = target_config["schema"]
+
                         targets[target_name] = target_info
 
                     default_target = profile_config.get(
@@ -202,8 +211,6 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
                         "targets": targets,
                         "default_target": default_target,
                     }
-
-            import json
 
             return json.dumps(result, indent=2)
 

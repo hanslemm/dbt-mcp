@@ -1,3 +1,5 @@
-A target is an argument to dbt commands that allows using different data warehouse connection configurations for the same dbt project, such as different users, hosts, or even completely different databases.
+Use the target argument to define the specific target to use when running dbt commands.
 
-If not defined, the target will be the default value in the `profiles.yml` of the dbt project. 
+Targets can be retrieved via the `get_profiles` tool.
+
+If not defined, the target will be the default value in the `profiles.yml` of the dbt project.

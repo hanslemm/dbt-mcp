@@ -18,7 +18,7 @@ The MCP server takes the following environment variable configuration:
 ### Tool Groups
 | Name | Default | Description |
 |------|---------|-------------|
-| `DISABLE_DBT_CLI` | `false` | Set this to `true` to disable dbt Core and dbt Cloud CLI MCP tools |
+| `DISABLE_DBT_CLI` | `false` | Set this to `true` to disable dbt Core, dbt Cloud CLI, and dbt Fusion MCP tools |
 | `DISABLE_SEMANTIC_LAYER` | `false` | Set this to `true` to disable dbt Semantic Layer MCP objects |
 | `DISABLE_DISCOVERY` | `false` | Set this to `true` to disable dbt Discovery API MCP objects |
 | `DISABLE_REMOTE` | `true` | Set this to `false` to enable remote MCP objects |
@@ -42,7 +42,7 @@ The MCP server takes the following environment variable configuration:
 | Name | Description |
 |------|-------------|
 | `DBT_PROJECT_DIR` | The path to where the repository of your dbt Project is hosted locally. This should look something like `/Users/firstnamelastname/reponame` |
-| `DBT_PATH` | The path to your dbt Core or dbt Cloud CLI executable. You can find your dbt executable by running `which dbt` |
+| `DBT_PATH` | The path to your dbt Core, dbt Cloud CLI, or dbt Fusion executable. You can find your dbt executable by running `which dbt` |
 
 ## Using with MCP Clients
 
@@ -125,6 +125,10 @@ Cursor MCP docs [here](https://docs.cursor.com/context/model-context-protocol) f
 ![inline-management](https://github.com/user-attachments/assets/d33d4083-5243-4b36-adab-72f12738c263)
 
 VS Code MCP docs [here](https://code.visualstudio.com/docs/copilot/chat/mcp-servers) for reference
+
+## Troubleshooting
+
+- Some MCP clients may be unable to find `uvx` from the JSON config. If this happens, try finding the full path to `uvx` with `which uvx` on Unix systems and placing this full path in the JSON. For instance: `"command": "/the/full/path/to/uvx"`.
 
 ## Tools
 

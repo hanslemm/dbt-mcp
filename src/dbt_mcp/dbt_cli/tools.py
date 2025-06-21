@@ -34,7 +34,10 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         return None
 
     def _run_dbt_command(
-        command: list[str], selector: str | None = None, target: str | None = None
+        command: list[str],
+        selector: str | None = None,
+        target: str | None = None,
+        timeout: int | None = None,
     ) -> str:
         # Commands that should always be quiet to reduce output verbosity
         verbose_commands = ["build", "compile", "docs", "parse", "run", "test"]
@@ -64,7 +67,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             stderr=subprocess.STDOUT,
             text=True,
         )
-        output, _ = process.communicate()
+        output, _ = process.communicate(timeout=timeout)
         return output or "OK"
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/build"))
@@ -106,7 +109,13 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
             default=None, description=get_prompt("dbt_cli/args/target")
         ),
     ) -> str:
-        return _run_dbt_command(["list"], selector, target)
+        try:
+            return _run_dbt_command(["list"], selector, target, timeout=10)
+        except subprocess.TimeoutExpired:
+            return (
+                "Timeout: dbt list command took too long to complete. "
+                + "Try using a more specific selector to narrow down the list of models."
+            )
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/parse"))
     def parse(
@@ -149,8 +158,20 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig) -> None:
         ),
     ) -> str:
         args = ["show", "--inline", sql_query, "--favor-state"]
-        if limit:
-            args.extend(["--limit", str(limit)])
+        # This is quite crude, but it should be okay for now
+        # until we have a dbt Fusion integration.
+        cli_limit = None
+        if "limit" in sql_query.lower():
+            # When --limit=-1, dbt won't apply a separate limit.
+            cli_limit = -1
+        elif limit:
+            # This can be problematic if the LLM provides
+            # a SQL limit and a `limit` argument. However, preferencing the limit
+            # in the SQL query leads to a better experience when the LLM
+            # makes that mistake.
+            cli_limit = limit
+        if cli_limit is not None:
+            args.extend(["--limit", str(cli_limit)])
         args.extend(["--output", "json"])
         return _run_dbt_command(args, target)
 

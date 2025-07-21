@@ -12,7 +12,13 @@ def api_client() -> MetadataAPIClient:
 
     if not host or not token:
         raise ValueError("DBT_HOST and DBT_TOKEN environment variables are required")
-    return MetadataAPIClient(host=host, token=token)
+    return MetadataAPIClient(
+        url=f"https://metadata.{host}/graphql",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
 
 
 @pytest.fixture

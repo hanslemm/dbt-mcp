@@ -14,12 +14,8 @@ from dbt_mcp.prompts.prompts import get_prompt
 _RESOURCE_TYPE_FIELD= Field(default=None, description=get_prompt("dbt_cli/args/resource_type"))
 _TARGET_FIELD = Field(default=None, description=get_prompt("dbt_cli/args/target"))
 _SELECTOR_FIELD = Field(default=None, description=get_prompt("dbt_cli/args/selectors"))
-_SQL_QUERY_FIELD = Field(
-    default=None, description=get_prompt("dbt_cli/args/sql_query")
-)
-_LIMIT_FIELD = Field(
-    default=None, description=get_prompt("dbt_cli/args/limit")
-)
+_SQL_QUERY_FIELD = Field(description=get_prompt("dbt_cli/args/sql_query"))
+_LIMIT_FIELD = Field(default=None, description=get_prompt("dbt_cli/args/limit"))
 
 
 
@@ -45,7 +41,6 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig, exclude_tools
 
         return None
 
-
     def _run_dbt_command(
         command: list[str],
         selector: str | None = None,
@@ -63,19 +58,18 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig, exclude_tools
                 "parse",
                 "run",
                 "test",
-                "list",
+                "list"
             ]
 
             if selector:
                 selector_params = str(selector).split(" ")
                 command = command + ["--select"] + selector_params
 
-            if target:
-                target_params = str(target).split(" ")
-                command = command + ["--target"] + target_params
-
             if isinstance(resource_type, Iterable):
                 command = command + ["--resource-type"] + resource_type
+
+            if target:
+                command = command + ["--target", target]
 
             full_command = command.copy()
             # Add --quiet flag to specific commands to reduce context window usage
@@ -98,14 +92,12 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig, exclude_tools
             )
             output, _ = process.communicate(timeout=timeout)
             return output or "OK"
-
         except subprocess.TimeoutExpired:
             return "Timeout: dbt command took too long to complete." + (
                 " Try using a specific selector to narrow down the results."
                 if is_selectable
                 else ""
             )
-
         except Exception as e:
             return str(e)
 
@@ -113,55 +105,53 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig, exclude_tools
     def build(
         selector: str | None = _SELECTOR_FIELD,
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(["build"], selector, target, is_selectable=True)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/compile"))
     def compile(
         selector: str | None = _SELECTOR_FIELD,
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(["compile"], selector, target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/docs"))
     def docs(
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(["docs", "generate"], target)
 
     @dbt_mcp.tool(name="list", description=get_prompt("dbt_cli/list"))
     def ls(
         selector: str | None = _SELECTOR_FIELD,
-        target: str | None = _TARGET_FIELD,
         resource_type: list[str] | None = _RESOURCE_TYPE_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(
             ["list"],
             selector,
-            target,
             timeout=config.dbt_cli_timeout,
             resource_type=resource_type,
-            is_selectable=True
+            is_selectable=True,
         )
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/parse"))
     def parse(
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(["parse"], target)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/run"))
     def run(
         selector: str | None = _SELECTOR_FIELD,
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(["run"], selector, target, is_selectable=True)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/test"))
     def test(
         selector: str | None = _SELECTOR_FIELD,
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         return _run_dbt_command(["test"], selector, target, is_selectable=True)
 
     @dbt_mcp.tool(description=get_prompt("dbt_cli/show"))
@@ -169,7 +159,7 @@ def register_dbt_cli_tools(dbt_mcp: FastMCP, config: DbtCliConfig, exclude_tools
         sql_query: str = _SQL_QUERY_FIELD,
         limit: int | None = _LIMIT_FIELD,
         target: str | None = _TARGET_FIELD,
-    ) -> str:
+    ) -> str | None:
         args = ["show", "--inline", sql_query, "--favor-state"]
         # This is quite crude, but it should be okay for now
         # until we have a dbt Fusion integration.

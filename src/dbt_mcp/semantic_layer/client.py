@@ -1,12 +1,19 @@
+from contextlib import AbstractContextManager
 from functools import cache
+from typing import Any, Protocol
 
-from dbtsl.api.shared.query_params import GroupByParam, OrderByGroupBy
-from dbtsl.client.sync import SyncSemanticLayerClient
+import pyarrow as pa
+from dbtsl.api.shared.query_params import (
+    GroupByParam,
+    OrderByGroupBy,
+    OrderByMetric,
+    OrderBySpec,
+)
 from dbtsl.error import QueryFailedError
 
 from dbt_mcp.config.config import SemanticLayerConfig
 from dbt_mcp.semantic_layer.gql.gql import GRAPHQL_QUERIES
-from dbt_mcp.semantic_layer.gql.gql_request import ConnAttr, submit_request
+from dbt_mcp.semantic_layer.gql.gql_request import submit_request
 from dbt_mcp.semantic_layer.levenshtein import get_misspellings
 from dbt_mcp.semantic_layer.types import (
     DimensionToolResponse,
@@ -19,12 +26,27 @@ from dbt_mcp.semantic_layer.types import (
 )
 
 
+class SemanticLayerClientProtocol(Protocol):
+    def session(self) -> AbstractContextManager[Any]: ...
+
+    def query(
+        self,
+        metrics: list[str],
+        group_by: list[GroupByParam | str] | None = None,
+        limit: int | None = None,
+        order_by: list[str | OrderByGroupBy | OrderByMetric] | None = None,
+        where: list[str] | None = None,
+        read_cache: bool = True,
+    ) -> pa.Table: ...
+
+
 class SemanticLayerFetcher:
     def __init__(
-        self, sl_client: SyncSemanticLayerClient, host: str, config: SemanticLayerConfig
+        self,
+        sl_client: SemanticLayerClientProtocol,
+        config: SemanticLayerConfig,
     ):
         self.sl_client = sl_client
-        self.host = host
         self.config = config
         self.entities_cache: dict[str, list[EntityToolResponse]] = {}
         self.dimensions_cache: dict[str, list[DimensionToolResponse]] = {}
@@ -32,11 +54,7 @@ class SemanticLayerFetcher:
     @cache
     def list_metrics(self) -> list[MetricToolResponse]:
         metrics_result = submit_request(
-            ConnAttr(
-                host=self.host,
-                params={"environmentid": self.config.prod_environment_id},
-                auth_header=f"Bearer {self.config.service_token}",
-            ),
+            self.config,
             {"query": GRAPHQL_QUERIES["metrics"]},
         )
         return [
@@ -53,11 +71,7 @@ class SemanticLayerFetcher:
         metrics_key = ",".join(sorted(metrics))
         if metrics_key not in self.dimensions_cache:
             dimensions_result = submit_request(
-                ConnAttr(
-                    host=self.host,
-                    params={"environmentid": self.config.prod_environment_id},
-                    auth_header=f"Bearer {self.config.service_token}",
-                ),
+                self.config,
                 {
                     "query": GRAPHQL_QUERIES["dimensions"],
                     "variables": {"metrics": [{"name": m} for m in metrics]},
@@ -82,11 +96,7 @@ class SemanticLayerFetcher:
         metrics_key = ",".join(sorted(metrics))
         if metrics_key not in self.entities_cache:
             entities_result = submit_request(
-                ConnAttr(
-                    host=self.host,
-                    params={"environmentid": self.config.prod_environment_id},
-                    auth_header=f"Bearer {self.config.service_token}",
-                ),
+                self.config,
                 {
                     "query": GRAPHQL_QUERIES["entities"],
                     "variables": {"metrics": [{"name": m} for m in metrics]},
@@ -118,28 +128,28 @@ class SemanticLayerFetcher:
                 " Did you mean: " + ", ".join(metric_misspelling.similar_words) + "?"
             )
             errors.append(
-                f"Metric {metric_misspelling.word} not found." + recommendations
-                if metric_misspelling.similar_words
-                else ""
+                f"Metric {metric_misspelling.word} not found."
+                + (recommendations if metric_misspelling.similar_words else "")
             )
 
         if errors:
             return f"Errors: {', '.join(errors)}"
 
-        available_dimensions = [d.name for d in self.get_dimensions(metrics)]
-        dimension_misspellings = get_misspellings(
+        available_group_by = [d.name for d in self.get_dimensions(metrics)] + [
+            e.name for e in self.get_entities(metrics)
+        ]
+        group_by_misspellings = get_misspellings(
             targets=[g.name for g in group_by or []],
-            words=available_dimensions,
+            words=available_group_by,
             top_k=5,
         )
-        for dimension_misspelling in dimension_misspellings:
+        for group_by_misspelling in group_by_misspellings:
             recommendations = (
-                " Did you mean: " + ", ".join(dimension_misspelling.similar_words) + "?"
+                " Did you mean: " + ", ".join(group_by_misspelling.similar_words) + "?"
             )
             errors.append(
-                f"Dimension {dimension_misspelling.word} not found." + recommendations
-                if dimension_misspelling.similar_words
-                else ""
+                f"Group by {group_by_misspelling.word} not found."
+                + (recommendations if group_by_misspelling.similar_words else "")
             )
 
         if errors:
@@ -170,6 +180,33 @@ class SemanticLayerFetcher:
         else:
             return QueryMetricsError(error=str(query_error))
 
+    def get_order_bys(
+        self,
+        order_by: list[OrderByParam],
+        metrics: list[str],
+        group_by: list[GroupByParam] | None = None,
+    ) -> list[OrderBySpec]:
+        result: list[OrderBySpec] = []
+        queried_group_by = {g.name: g for g in group_by} if group_by else {}
+        queried_metrics = set(metrics)
+        for o in order_by:
+            if o.name in queried_metrics:
+                result.append(OrderByMetric(name=o.name, descending=o.descending))
+            elif o.name in queried_group_by:
+                selected_group_by = queried_group_by[o.name]
+                result.append(
+                    OrderByGroupBy(
+                        name=selected_group_by.name,
+                        descending=o.descending,
+                        grain=selected_group_by.grain,
+                    )
+                )
+            else:
+                raise ValueError(
+                    f"Order by `{o.name}` not found in metrics or group by"
+                )
+        return result
+
     def query_metrics(
         self,
         metrics: list[str],
@@ -191,18 +228,18 @@ class SemanticLayerFetcher:
                 # Catching any exception within the session
                 # to ensure it is closed properly
                 try:
+                    parsed_order_by: list[OrderBySpec] = (
+                        self.get_order_bys(
+                            order_by=order_by, metrics=metrics, group_by=group_by
+                        )
+                        if order_by is not None
+                        else []
+                    )
                     query_result = self.sl_client.query(
                         metrics=metrics,
                         # TODO: remove this type ignore once this PR is merged: https://github.com/dbt-labs/semantic-layer-sdk-python/pull/80
                         group_by=group_by,  # type: ignore
-                        order_by=[
-                            OrderByGroupBy(
-                                name=o.name,
-                                descending=o.descending,
-                                grain=None,
-                            )
-                            for o in order_by or []
-                        ],
+                        order_by=parsed_order_by,  # type: ignore
                         where=[where] if where else None,
                         limit=limit,
                     )
@@ -211,29 +248,6 @@ class SemanticLayerFetcher:
             if query_error:
                 return self._format_query_failed_error(query_error)
             json_result = query_result.to_pandas().to_json(orient="records", indent=2)
-            return QueryMetricsSuccess(result=json_result)
+            return QueryMetricsSuccess(result=json_result or "")
         except Exception as e:
             return self._format_query_failed_error(e)
-
-
-def get_semantic_layer_fetcher(config: SemanticLayerConfig) -> SemanticLayerFetcher:
-    is_local = config.host and config.host.startswith("localhost")
-    if is_local:
-        host = config.host
-    elif config.multicell_account_prefix:
-        host = f"{config.multicell_account_prefix}.semantic-layer.{config.host}"
-    else:
-        host = f"semantic-layer.{config.host}"
-    assert host is not None
-
-    semantic_layer_client = SyncSemanticLayerClient(
-        environment_id=config.prod_environment_id,
-        auth_token=config.service_token,
-        host=host,
-    )
-
-    return SemanticLayerFetcher(
-        sl_client=semantic_layer_client,
-        host=f"http://{host}" if is_local else f"https://{host}",
-        config=config,
-    )

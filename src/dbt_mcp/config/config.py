@@ -18,24 +18,25 @@ class TrackingConfig:
 
 @dataclass
 class SemanticLayerConfig:
-    multicell_account_prefix: str | None
+    url: str
     host: str
     prod_environment_id: int
     service_token: str
+    headers: dict[str, str]
 
 
 @dataclass
 class DiscoveryConfig:
-    multicell_account_prefix: str | None
-    host: str
+    url: str
+    headers: dict[str, str]
     environment_id: int
-    token: str
 
 
 @dataclass
 class DbtCliConfig:
     project_dir: str
     dbt_path: str
+    dbt_cli_timeout: int
 
 
 @dataclass
@@ -55,6 +56,7 @@ class Config:
     dbt_cli_config: DbtCliConfig | None
     discovery_config: DiscoveryConfig | None
     semantic_layer_config: SemanticLayerConfig | None
+    disable_tools: list[str]
 
 
 def load_config() -> Config:
@@ -74,6 +76,13 @@ def load_config() -> Config:
     disable_discovery = os.environ.get("DISABLE_DISCOVERY", "false") == "true"
     disable_remote = os.environ.get("DISABLE_REMOTE", "true") == "true"
     multicell_account_prefix = os.environ.get("MULTICELL_ACCOUNT_PREFIX", None)
+    dbt_cli_timeout = int(os.environ.get("DBT_CLI_TIMEOUT", 10))
+    disable_tools = os.environ.get("DISABLE_TOOLS", "").split(",")
+
+    # set default warn error options if not provided
+    if os.environ.get("DBT_WARN_ERROR_OPTIONS") is None:
+        warn_error_options = '{"error": ["NoNodesForSelectionCriteria"]}'
+        os.environ["DBT_WARN_ERROR_OPTIONS"] = warn_error_options
 
     # Devon: I messed up and uploaded the wrong
     # env var here https://docs.cursor.com/tools.
@@ -155,15 +164,22 @@ def load_config() -> Config:
         dbt_cli_config = DbtCliConfig(
             project_dir=project_dir,
             dbt_path=dbt_path,
+            dbt_cli_timeout=dbt_cli_timeout,
         )
 
     discovery_config = None
     if not disable_discovery and actual_host and actual_prod_environment_id and token:
+        if multicell_account_prefix:
+            url = f"https://{multicell_account_prefix}.metadata.{actual_host}/graphql"
+        else:
+            url = f"https://metadata.{actual_host}/graphql"
         discovery_config = DiscoveryConfig(
-            multicell_account_prefix=multicell_account_prefix,
-            host=actual_host,
+            url=url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
             environment_id=actual_prod_environment_id,
-            token=token,
         )
 
     semantic_layer_config = None
@@ -173,11 +189,24 @@ def load_config() -> Config:
         and actual_prod_environment_id
         and token
     ):
+        is_local = actual_host and actual_host.startswith("localhost")
+        if is_local:
+            host = actual_host
+        elif multicell_account_prefix:
+            host = f"{multicell_account_prefix}.semantic-layer.{actual_host}"
+        else:
+            host = f"semantic-layer.{actual_host}"
+        assert host is not None
+
         semantic_layer_config = SemanticLayerConfig(
-            multicell_account_prefix=multicell_account_prefix,
-            host=actual_host,
+            url=f"http://{host}" if is_local else f"https://{host}" + "/api/graphql",
+            host=host,
             prod_environment_id=actual_prod_environment_id,
             service_token=token,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "x-dbt-partner-source": "dbt-mcp",
+            },
         )
 
     local_user_id = None
@@ -203,4 +232,5 @@ def load_config() -> Config:
         dbt_cli_config=dbt_cli_config,
         discovery_config=discovery_config,
         semantic_layer_config=semantic_layer_config,
+        disable_tools=disable_tools,
     )

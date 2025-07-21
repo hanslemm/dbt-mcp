@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import (
     Annotated,
     Any,
@@ -16,8 +17,7 @@ from mcp.server.fastmcp.utilities.func_metadata import (
 from mcp.types import (
     CallToolRequestParams,
     CallToolResult,
-    EmbeddedResource,
-    ImageContent,
+    ContentBlock,
     TextContent,
 )
 from mcp.types import Tool as RemoteTool
@@ -69,7 +69,11 @@ def _get_remote_tools(base_url: str, headers: dict[str, str]) -> list[RemoteTool
         return []
 
 
-async def register_remote_tools(dbt_mcp: FastMCP, config: RemoteConfig) -> None:
+async def register_remote_tools(
+    dbt_mcp: FastMCP,
+    config: RemoteConfig,
+    exclude_tools: Sequence[str] = [],
+) -> None:
     is_local = config.host and config.host.startswith("localhost")
     path = "/mcp" if is_local else "/api/ai/mcp"
     scheme = "http://" if is_local else "https://"
@@ -88,58 +92,69 @@ async def register_remote_tools(dbt_mcp: FastMCP, config: RemoteConfig) -> None:
         f"Loaded remote tools: {', '.join([tool.name for tool in remote_tools])}",
     )
     for tool in remote_tools:
+        if tool.name in exclude_tools:
+            continue
+
         # Create a new function using a factory to avoid closure issues
         def create_tool_function(tool_name: str):
-            async def tool_function(
-                *args, **kwargs
-            ) -> list[TextContent | ImageContent | EmbeddedResource]:
-                with Client(base_url=base_url, headers=headers) as client:
-                    tool_call_http_response = client.post(
-                        "/tools/call",
-                        json=CallToolRequest(
-                            method="tools/call",
-                            params=CallToolRequestParams(
-                                name=tool_name,
-                                arguments=kwargs,
-                            ),
-                        ).model_dump(),
-                        timeout=30,
-                    )
-                    if tool_call_http_response.status_code != 200:
-                        return [
-                            TextContent(
-                                type="text",
-                                text=f"Failed to call tool {tool_name} with "
-                                + f"status code: {tool_call_http_response.status_code} "
-                                + f"error message: {tool_call_http_response.text}",
+            async def tool_function(*args, **kwargs) -> Sequence[ContentBlock]:
+                try:
+                    with Client(base_url=base_url, headers=headers) as client:
+                        tool_call_http_response = client.post(
+                            "/tools/call",
+                            json=CallToolRequest(
+                                method="tools/call",
+                                params=CallToolRequestParams(
+                                    name=tool_name,
+                                    arguments=kwargs,
+                                ),
+                            ).model_dump(),
+                            timeout=30,
+                        )
+                        if tool_call_http_response.status_code != 200:
+                            return [
+                                TextContent(
+                                    type="text",
+                                    text=f"Failed to call tool {tool_name} with "
+                                    + f"status code: {tool_call_http_response.status_code} "
+                                    + f"error message: {tool_call_http_response.text}",
+                                )
+                            ]
+                        try:
+                            tool_call_jsonrpc_response = (
+                                JSONRPCResponse.model_validate_json(
+                                    tool_call_http_response.text
+                                )
                             )
-                        ]
-                    try:
-                        tool_call_jsonrpc_response = (
-                            JSONRPCResponse.model_validate_json(
-                                tool_call_http_response.text
+                            tool_call_result = CallToolResult.model_validate(
+                                tool_call_jsonrpc_response.result
                             )
+                        except ValidationError as e:
+                            raise ValueError(
+                                f"Failed to parse tool response for {tool_name}: {e}"
+                            ) from e
+                        if tool_call_result.isError:
+                            raise ValueError(
+                                f"Tool {tool_name} reported an error: "
+                                + f"{tool_call_result.content}"
+                            )
+                        return tool_call_result.content
+                except Exception as e:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=str(e),
                         )
-                        tool_call_result = CallToolResult.model_validate(
-                            tool_call_jsonrpc_response.result
-                        )
-                    except ValidationError as e:
-                        raise ValueError(
-                            f"Failed to parse tool response for {tool_name}: {e}"
-                        ) from e
-                    if tool_call_result.isError:
-                        raise ValueError(
-                            f"Tool {tool_name} reported an error: "
-                            + f"{tool_call_result.content}"
-                        )
-                    return tool_call_result.content
+                    ]
 
             return tool_function
 
         new_tool = create_tool_function(tool.name)
         dbt_mcp._tool_manager._tools[tool.name] = Tool(
             fn=new_tool,
+            title=tool.title,
             name=tool.name,
+            annotations=tool.annotations,
             description=tool.description or "",
             parameters=tool.inputSchema,
             fn_metadata=get_remote_tool_fn_metadata(tool),
